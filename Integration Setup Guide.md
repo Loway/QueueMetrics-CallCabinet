@@ -19,14 +19,116 @@ In order to store your files on CallCabinet  we must make sure CCModule is insta
 
 https://www.callcabinet.com/knowledge-base/setting-atmos-call-recording-asterisk/
 
+Make also sure that your PBX records your calls, saving them with the following filename format:
+
+Inbound calls: **in**-**AgentExtension**-**CustomerNumber**-**Date**-**Time**-**AsteriskUniqueID**.WAV
+
+Outbound calls: **out**-**CustomerNumber**-**AgentExtension**-**Date**-**Time**-**AsteriskUniqueID**.WAV 
+
 Now we need Asterisk to record our calls and place them in our repository folder (the folder specified in Ccconfig.txt). In this example we will use a Elastix-FreePbx system on a Centos 7 machine.
 
 First, let's turn on the recording feature for all calls on our queue.
 
 ![1](img/post_imgs/image_CCQ01.png)
 
-Now, we need to enable a Post-Recording script that renames and moves the recordings to our repository (Default is /home/callcabinet/recordings). We will use a script called moverec.sh from Atmos, with some slight modifications. To get the script download the moverec.sh file from this repository.
+Now, we need to enable a Post-Recording script that renames and moves the recordings to our repository (Default is /home/callcabinet/recordings). We will use a script called moverec.sh from Atmos, albeit a slightly modified version. Copy and paste the following lines and save them as moverec.sh.
 
+```
+#!/bin/bash
+
+#Log File
+LOGFILE="/home/callcabinet/move.out"
+
+# Logic in the script is as follows:
+# 1) Calculate call duration (note - this goes from the call start time, 
+# which is not necessarily the start of the call recording):
+CALLSTART=${5}T${6}
+CALLSTARTSEC=`date -d "${5} ${6}" "+%s"`
+CALLENDSEC=`date  "+%s"`
+#Confirm the location of the recordings as set in the CCModule
+CCSTAGING=/home/callcabinet/recordings
+
+FOLDERS=`date +"%Y/%m/%d"`
+
+#CALLDUR=$((CALLENDSEC-CALLSTARTSEC))
+CALLDUR=0
+
+SRCFILE=${1}
+
+if [ "${CALLDUR}" -le 0 ]
+then
+  CALLDUR=0
+fi
+
+#2) Call Direction (there are easier ways to do this)
+# Determine in our out call from prefix
+FILEBASE=`basename $SRCFILE`
+CALLDIR=${FILEBASE%%-*}
+
+#We get the agent extension from the filename
+
+
+if [ "${CALLDIR}" = "IN" ] || [ "${CALLDIR}" = "in" ] || [ "${CALLDIR}" = "" ]
+then
+   CALLDIR="INCOMING"
+   REMOTENUM=${CALLER}
+   USEREXT=${AMPUSER}
+
+   if [ -z "${USEREXT}" ]
+   then
+      USEREXT=`echo $FILEBASE | cut -d '-' -f 2`
+   fi
+
+   if [ -z "${REMOTENUM}" ]
+   then
+      REMOTENUM=`echo $FILEBASE | cut -d '-' -f 3`
+   fi
+
+fi
+ 
+if [ "${CALLDIR}" = "OUT" ] || [ "${CALLDIR}" = "out" ] || [ "${CALLDIR}" = "force" ]
+then
+
+   CALLDIR="OUTGOING"
+   USEREXT=${AMPUSER}
+   REMOTENUM=${CALLED}
+
+   if [ -z "${USEREXT}" ]
+   then
+      USEREXT=`echo $FILEBASE} | cut -d '-' -f 3`
+   fi
+
+   if [ -z "${REMOTENUM}" ]
+   then
+      REMOTENUM=`echo $FILEBASE | cut -d '-' -f 2`
+   fi
+
+fi
+
+#3) Rename the file
+DSTFILE=${CALLSTART}_${CALLDUR}_${CALLDIR}_${REMOTENUM}_${USEREXT}_${8}.WAV
+mkdir -p /home/callcabinet/recordings/${FOLDERS}
+mv ${SRCFILE}* ${CCSTAGING}/${FOLDERS}/${DSTFILE}
+
+echo '------------------------------------'>> ${LOGFILE}
+echo 'Srcfile: ' ${SRCFILE} >> ${LOGFILE}
+echo 'Ccstaging ' ${CCSTAGING} >> ${LOGFILE}
+echo 'Folders: ' ${FOLDERS} >> ${LOGFILE}
+echo 'Destfile: ' ${DSTFILE} >> ${LOGFILE}
+echo 'Callerid(number):' ${3} >> ${LOGFILE}
+echo 'CDR(dst):' ${4} >> ${LOGFILE}
+echo 'CDR(start):' ${5} ${6} >> ${LOGFILE}
+echo 'CDR(src):' ${7} >> ${LOGFILE}
+echo 'UNIQUEID:' ${8} >> ${LOGFILE}
+echo 'DURATION:' ${CALLDUR} >> ${LOGFILE}
+echo 'DIRECTION:' ${CALLDIR} >> ${LOGFILE}
+echo 'AMPUSER:' ${AMPUSER} >> ${LOGFILE}
+echo 'REMOTENUM:' ${REMOTENUM} >> ${LOGFILE}
+echo 'CALLED:' ${CALLED} >> ${LOGFILE}
+echo 'CALLER:' ${CALLER} >> ${LOGFILE}
+echo '------------------------------------'>> ${LOGFILE}
+
+```
 We then place the moverec.sh into /usr/share/asterisk/agi-bin/ .This script automatically renames and replaces your recordings in your repository, using a specific name format that contains various information about the recording, so that it can be easily retrieved later on.
 
 We must make sure that the variable CCSTAGING is set to our repository folder, in our case this is /home/callcabinet/recordings.
@@ -120,23 +222,39 @@ Go to
 Scroll down until you reach extension 28 (agent custom dial), and replace it with the follwoing:
 
 ```
-; extension 28: agent custom dial
-exten => 28,1,Answer
-exten => 28,n,NoOp( "QM: Agent Custom Dial. Dialing ${EXTTODIAL} on queue ${OUTQUEUE}  made by '${QM_LOGIN}'" )
-exten => 28,n,Set(QDIALER_QUEUE=${OUTQUEUE})
-exten => 28,n,Set(QDIALER_NUMBER=${EXTTODIAL})
-exten => 28,n,Set(QDIALER_AGENT=Agent/${AGENTCODE})
-exten => 28,n,Set(QDIALER_CHANNEL=SIP/${QDIALER_NUMBER})
-exten => 28,n,Set(QueueName=${QDIALER_QUEUE})
-exten => 28,n,Set(CALLFILENAME=${STRFTIME(${EPOCH},,%Y%m%d-%H%M%S)}-OUT-${QDIALER_NUMBER}-${AGENTCODE}-${UNIQUEID})
+; extension 28: agent custom dial 
+exten => 28,1,Answer 
 
-;This is where we set the folder to be the "temp folder"
-exten => 28,n,MixMonitor(/var/spool/asterisk/monitor/temp/${CALLFILENAME}.${MIXMON_FORMAT},b,${MIXMON_POST})
+; Multiline, must be written as a single line in the dialplan
+;---------------------------------------------------------------
+exten => 28,n,NoOp( "QM: Agent Custom Dial. Dialing ${EXTTODIAL} 
+on queue ${OUTQUEUE} made by '${QM_LOGIN}'" ) 
+;---------------------------------------------------------------
 
-exten => 28,n,Goto(qm-queuedial,s,1)
+exten => 28,n,Set(QDIALER_QUEUE=${OUTQUEUE}) 
+exten => 28,n,Set(QDIALER_NUMBER=${EXTTODIAL}) 
+exten => 28,n,Set(QDIALER_AGENT=SIP/${AGENTCODE}) 
+exten => 28,n,Set(QDIALER_CHANNEL=SIP/${QDIALER_NUMBER}) 
+exten => 28,n,Set(QueueName=${QDIALER_QUEUE}) 
+
+; Multiline, must be written as a single line in the dialplan
+;---------------------------------------------------------------
+exten => 28,n,Set(CALLFILENAME=OUT-${QDIALER_NUMBER}-${AGENTCODE}-
+${STRFTIME(${EPOCH},,%Y%m%d-%H%M%S)}-${UNIQUEID}) 
+;---------------------------------------------------------------
+
+; Multiline, must be written as a single line in the dialplan
+;---------------------------------------------------------------
+exten => 28,n,MixMonitor(/var/spool/asterisk/monitor/${STRFTIME(${EPOCH},,%Y-%m/%d)}/
+${CALLFILENAME}.${MIXMON_FORMAT},b,${MIXMON_POST}) 
+;---------------------------------------------------------------
+
+exten => 28,n,Goto(qm-queuedial,s,1) 
 exten => 28,n,Hangup
 
 ```
+
+**NOTE: Some parts of the above dialplan piece are too long to fit in the document. They have been marked so that when you copy this part in the dialplan you know which must be written as a single line. Remember that each line in you dialplan should start with "exten =>".**
 
 Now, after reloading Asterisk's dialplan, we will find that our outbound calls are also being recorded and moved to the staging folder correctly. They will then be uploaded to your CallCabinet For QueueMetrics account.
 

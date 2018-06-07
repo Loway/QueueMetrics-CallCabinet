@@ -1,3 +1,8 @@
+#!/bin/bash
+
+#Log File
+LOGFILE="/home/callcabinet/move.out"
+
 #Logic in the script is as follows:
 #1) Calculate call duration (note - this goes from the call start time, which is not necessarily the start of the call recording):
 CALLSTART=${5}T${6}
@@ -5,58 +10,83 @@ CALLSTARTSEC=`date -d "${5} ${6}" "+%s"`
 CALLENDSEC=`date  "+%s"`
 #Confirm the location of the recordings as set in the CCModule
 CCSTAGING=/home/callcabinet/recordings
+
 FOLDERS=`date +"%Y/%m/%d"`
-CALLDUR=$((CALLENDSEC-CALLSTARTSEC))
-if [ "$CALLDUR" -le 0 ]
+
+#CALLDUR=$((CALLENDSEC-CALLSTARTSEC))
+CALLDUR=0
+
+SRCFILE=${1}
+
+if [ "${CALLDUR}" -le 0 ]
 then
   CALLDUR=0
 fi
 
-echo 'move' >> /var/lib/asterisk/bin/move.out
-
 #2) Call Direction (there are easier ways to do this)
 # Determine in our out call from prefix
 FILEBASE=`basename $SRCFILE`
-echo `BASENAME $SRCFILE` >> move.out
+CALLDIR=${FILEBASE%%-*}
 
-#Here we break down the file name ($1). And look if the call is store in the "temp" folder
-IFS='/' read -a myarray <<< "$1"
-CALLDIRECTORY=${myarray[5]}
+#We get the agent extension from the filename
 
-#If the directory is temp, it means that it's an outbound call placed there by QueueMetrics' dialplan
-if [ "$CALLDIRECTORY" = "temp" ]
+
+if [ "${CALLDIR}" = "IN" ] || [ "${CALLDIR}" = "in" ] || [ "${CALLDIR}" = "" ]
 then
-   CALLDIR="OUTGOING"
-
-   IFS='-' read -a filenamearray <<< "$1"
-   MYCALLERID=${filenamearray[4]}
-   USEREXT=$AMPUSER
-   REMOTENUM=$CALLED
-
-#If the directory is not temp, it means that it's a normal inbound call, or a call that has not been made through QueueMetrics. These calls will be treated as normal inbound calls
-else
    CALLDIR="INCOMING"
+   REMOTENUM=${CALLER}
+   USEREXT=${AMPUSER}
 
-   IFS='-' read -a filenamearray <<< "$1"
-   MYCALLERID=${filenamearray[2]}
-
-   REMOTENUM=$CALLER
-   if [ -z "$AMPUSER" ]
+   if [ -z "${USEREXT}" ]
    then
-      AMPUSER=`echo $FILEBASE | cut -d '-' -f 2`
+      USEREXT=`echo $FILEBASE | cut -d '-' -f 2`
    fi
-   USEREXT=$AMPUSER
+
+   if [ -z "${REMOTENUM}" ]
+   then
+      REMOTENUM=`echo $FILEBASE | cut -d '-' -f 3`
+   fi
+
+fi
+ 
+if [ "${CALLDIR}" = "OUT" ] || [ "${CALLDIR}" = "out" ] || [ "${CALLDIR}" = "force" ]
+then
+
+   CALLDIR="OUTGOING"
+   USEREXT=${AMPUSER}
+   REMOTENUM=${CALLED}
+
+   if [ -z "${USEREXT}" ]
+   then
+      USEREXT=`echo $FILEBASE} | cut -d '-' -f 3`
+   fi
+
+   if [ -z "${REMOTENUM}" ]
+   then
+      REMOTENUM=`echo $FILEBASE | cut -d '-' -f 2`
+   fi
+
 fi
 
-
-
-
 #3) Rename the file
-SRCFILE=$1
-DSTFILE=${CALLSTART}_${CALLDUR}_${CALLDIR}_${MYCALLERID}_$3_${8}.WAV
+DSTFILE=${CALLSTART}_${CALLDUR}_${CALLDIR}_${REMOTENUM}_${USEREXT}_${8}.WAV
 mkdir -p /home/callcabinet/recordings/${FOLDERS}
 mv ${SRCFILE}* ${CCSTAGING}/${FOLDERS}/${DSTFILE}
-echo 'srcfile: ' ${SCRFILE} '- ccstaging ' ${CCSTAGING} '-folders: ' ${FOLDERS} '-destfile: ' ${DESTFILE} >> move.out
-echo ${1} ${2} ${3} ${4} ${5} ${6} ${CALLDUR} ${CALLDIR} >> move.out
 
-mv move.out ${CCSTAGING}/${FOLDERS}/
+echo '------------------------------------'>> ${LOGFILE}
+echo 'Srcfile: ' ${SRCFILE} >> ${LOGFILE}
+echo 'Ccstaging ' ${CCSTAGING} >> ${LOGFILE}
+echo 'Folders: ' ${FOLDERS} >> ${LOGFILE}
+echo 'Destfile: ' ${DSTFILE} >> ${LOGFILE}
+echo 'Callerid(number):' ${3} >> ${LOGFILE}
+echo 'CDR(dst):' ${4} >> ${LOGFILE}
+echo 'CDR(start):' ${5} ${6} >> ${LOGFILE}
+echo 'CDR(src):' ${7} >> ${LOGFILE}
+echo 'UNIQUEID:' ${8} >> ${LOGFILE}
+echo 'DURATION:' ${CALLDUR} >> ${LOGFILE}
+echo 'DIRECTION:' ${CALLDIR} >> ${LOGFILE}
+echo 'AMPUSER:' ${AMPUSER} >> ${LOGFILE}
+echo 'REMOTENUM:' ${REMOTENUM} >> ${LOGFILE}
+echo 'CALLED:' ${CALLED} >> ${LOGFILE}
+echo 'CALLER:' ${CALLER} >> ${LOGFILE}
+echo '------------------------------------'>> ${LOGFILE}
