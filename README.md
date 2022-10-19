@@ -1,7 +1,6 @@
-# QueueMetrics-CallCabinet
-QueueMetrics CallCabinet integration
+# QueueMetrics <-> CallCabinet integration
 
-This repository contains resources that are useful for the integration between Loway's QueueMetrics and Atmos' CallCabinet.
+This repository contains resources that are useful for the integration between Loway's QueueMetrics and Atmos' CallCabinet. These files are provided for historical interest only, as QueueMetrics **does not support CallCabinet natively** - if you need a privacy-first way to sore and retrieve recordings, see AudioVault: https://www.queuemetrics.com/blog/2021/08/25/AudioVault-tutorial/
 
 ## Contents
 
